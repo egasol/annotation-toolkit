@@ -66,14 +66,32 @@ def handle_annotations(filename):
             
 @app.route('/batch_annotation_status', methods=['POST'])
 def batch_annotation_status():
-    """Checks annotation status against the current annotation directory."""
+    """
+    Checks annotation status against the current annotation directory.
+    This version is optimized to read the directory only once.
+    """
     data = request.get_json()
-    filenames = data.get('filenames', [])
+    filenames_from_client = data.get('filenames', [])
     status = {}
-    for name in filenames:
-        annotation_path = config.annotation_dir / f"{name}.json"
-        status[name] = annotation_path.exists()
+
+    try:
+        # 1. Get all existing annotation files in one go.
+        # We create a set of the base filenames (e.g., 'image1.jpg') for fast lookups.
+        # The .stem of 'image1.jpg.json' is 'image1.jpg'.
+        existing_annotations = {p.stem for p in config.annotation_dir.glob('*.json')}
+
+        # 2. Check the status for each client file against the set.
+        for name in filenames_from_client:
+            status[name] = name in existing_annotations
+
+    except Exception as e:
+        print(f"Error reading annotation directory: {e}")
+        # On error, report all as un-annotated.
+        for name in filenames_from_client:
+            status[name] = False
+
     return jsonify(status)
+
 
 # --- Main Execution ---
 if __name__ == '__main__':
