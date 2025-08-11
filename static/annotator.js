@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- DOM Elements ---
     const canvas = document.getElementById('annotatorCanvas');
     const ctx = canvas.getContext('2d');
+    const resetViewBtn = document.getElementById('reset-view-btn');
     const fileListElem = document.getElementById('file-list');
     const saveBtn = document.getElementById('save-btn');
     const imageNameDisplay = document.getElementById('current-image-name');
@@ -19,9 +20,45 @@ document.addEventListener('DOMContentLoaded', () => {
     let startX, startY;
     let currentRoi = {};
     let currentProperties = {};
-    let localFileObjects = {}; // To store the File objects from the user's selection
+    let localFileObjects = {};
 
-    // --- Core Functions ---
+    // --- View Transform State ---
+    let scale = 1.0;
+    let originX = 0;
+    let originY = 0;
+    let isPanning = false;
+    let panStart = { x: 0, y: 0 };
+    const MIN_SCALE = 0.1;
+    const MAX_SCALE = 10;
+
+    // --- Helper Functions ---
+
+    // Corrected: Converts a canvas point to a point in the "world" (image) space
+    const getMousePos = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const canvasX = e.clientX - rect.left;
+        const canvasY = e.clientY - rect.top;
+        
+        // Convert canvas point to world point
+        return {
+            x: (canvasX / scale) + originX,
+            y: (canvasY / scale) + originY,
+        };
+    };
+    
+    const zoomToFit = (imageWidth, imageHeight) => {
+        const canvasWidth = canvas.clientWidth;
+        const canvasHeight = canvas.clientHeight;
+        const scaleX = canvasWidth / imageWidth;
+        const scaleY = canvasHeight / imageHeight;
+        
+        scale = Math.min(scaleX, scaleY);
+
+        // Center the image. Origin is the top-left of the viewport in world-space.
+        originX = (imageWidth - canvasWidth / scale) / 2;
+        originY = (imageHeight - canvasHeight / scale) / 2;
+    };
+    
     const resetState = () => {
         rois = [];
         currentImage = null;
@@ -30,44 +67,64 @@ document.addEventListener('DOMContentLoaded', () => {
         localFileObjects = {};
         imageNameDisplay.textContent = 'No image selected';
         fileListElem.innerHTML = '<li>Select a folder to begin.</li>';
+        scale = 1.0;
+        originX = 0;
+        originY = 0;
         redraw();
     };
 
+    // Corrected: Redraw function with correct transform logic
     const redraw = () => {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const canvasWidth = canvas.width;
+        const canvasHeight = canvas.height;
+        
+        ctx.save();
+        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+        ctx.fillStyle = '#e9e9e9';
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+        
+        // Translate and scale to view the world from the origin point
+        ctx.translate(-originX * scale, -originY * scale);
+        ctx.scale(scale, scale);
+
         if (currentImage) {
-            canvas.width = currentImage.width;
-            canvas.height = currentImage.height;
+            ctx.imageSmoothingEnabled = scale < 1;
             ctx.drawImage(currentImage, 0, 0);
         } else {
-            ctx.fillStyle = '#e9e9e9';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.fillStyle = 'black';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText("Select an image from the list", canvas.width / 2, canvas.height / 2);
-            return;
+            ctx.font = '20px Arial';
+            // To center text, we need to find the center of the canvas in world coordinates
+            const worldCenterX = (canvasWidth / 2) / scale + originX;
+            const worldCenterY = (canvasHeight / 2) / scale + originY;
+            ctx.fillText("Select an image to begin", worldCenterX, worldCenterY);
         }
+
         rois.forEach(roi => {
             ctx.strokeStyle = 'lime';
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 2 / scale;
             ctx.strokeRect(roi.x, roi.y, roi.w, roi.h);
-            ctx.font = '16px Arial';
+            ctx.font = `${16 / scale}px Arial`;
             ctx.fillStyle = 'lime';
             const label = roi.properties.Class || 'Untitled';
-            ctx.fillText(label, roi.x, roi.y > 10 ? roi.y - 5 : roi.y + roi.h + 15);
+            ctx.fillText(label, roi.x, roi.y > 10 / scale ? roi.y - 5 / scale : roi.y + roi.h + 15 / scale);
         });
+
         if (isDrawing && currentRoi.w && currentRoi.h) {
             ctx.strokeStyle = 'yellow';
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 2 / scale;
             ctx.strokeRect(currentRoi.x, currentRoi.y, currentRoi.w, currentRoi.h);
         }
-    };
 
+        ctx.restore();
+    };
+    
+    // Unchanged from here...
     const populatePropertiesPanel = (customConfig = null) => {
         const processConfig = (config) => {
             propertiesForm.innerHTML = '';
-            currentProperties = {}; // Reset current properties
+            currentProperties = {};
             Object.keys(config).forEach(propName => {
                 const options = config[propName];
                 const group = document.createElement('div');
@@ -91,7 +148,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             });
         };
-
         if (customConfig) {
             processConfig(customConfig);
         } else {
@@ -104,52 +160,43 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
         }
     };
-    
     const updateAnnotationStatus = async () => {
         const filenames = Object.keys(localFileObjects);
         if (filenames.length === 0) return;
-
         const response = await fetch('/batch_annotation_status', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ filenames }),
         });
         const annotationStatus = await response.json();
-
         document.querySelectorAll('#file-list .file-item').forEach(li => {
             const name = li.dataset.filename;
             const isAnnotated = annotationStatus[name];
             li.textContent = `${isAnnotated ? '✅' : '📄'} ${name}`;
         });
     };
-
     const switchImage = async (filename) => {
         if (currentImageName && currentImageName !== filename) {
             await saveAnnotations();
         }
-
         rois = [];
         currentImageName = filename;
-
         document.querySelectorAll('#file-list .file-item').forEach(item => {
             item.classList.toggle('active', item.dataset.filename === filename);
         });
-
         imageNameDisplay.textContent = `Annotating: ${filename}`;
-
         const file = localFileObjects[filename];
         const localUrl = URL.createObjectURL(file);
-
         const img = new Image();
         img.src = localUrl;
         img.onload = () => {
             currentImage = img;
+            zoomToFit(img.width, img.height);
             loadAnnotations(filename);
             URL.revokeObjectURL(localUrl);
         };
         img.onerror = () => { alert(`Failed to load image: ${filename}`); };
     };
-
     const loadAnnotations = async (filename) => {
         try {
             const response = await fetch(`/annotations/${filename}`);
@@ -160,35 +207,26 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         redraw();
     };
-
     const saveAnnotations = async () => {
         if (!currentImageName) return;
         try {
-            const response = await fetch(`/annotations/${currentImageName}`, {
+            await fetch(`/annotations/${currentImageName}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(rois),
             });
-            await response.json();
             console.log(`Annotations for ${currentImageName} saved.`);
-            const fileItem = document.querySelector(`li[data-filename="${currentImageName}"]`);
-            if (fileItem && !fileItem.textContent.startsWith('✅')) {
-                fileItem.textContent = `✅ ${currentImageName}`;
-            }
+            await updateAnnotationStatus();
         } catch (error) {
             console.error('Error saving annotations:', error);
         }
     };
-    
     // --- Event Listeners ---
-
     imageFolderInput.addEventListener('change', async (e) => {
         if (e.target.files.length === 0) return;
-
         resetState();
         const supportedFormats = ['image/jpeg', 'image/png', 'image/gif'];
         let imageFiles = [];
-
         for (const file of e.target.files) {
             if (supportedFormats.includes(file.type)) {
                 localFileObjects[file.name] = file;
@@ -196,35 +234,24 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         imageFiles.sort();
-
         if (imageFiles.length === 0) {
-            fileListElem.innerHTML = '<li>No supported images found in the selected directory.</li>';
+            fileListElem.innerHTML = '<li>No supported images found.</li>';
             return;
         }
-
-        // Now that files are loaded client-side, check their status on the server
-        await updateAnnotationStatus();
-
-        // And finally, populate the UI list
         fileListElem.innerHTML = '';
         imageFiles.forEach(name => {
             const li = document.createElement('li');
-            const fileItem = document.querySelector(`li[data-filename="${name}"]`);
-            const isAnnotated = fileItem ? fileItem.textContent.startsWith('✅') : false;
-            li.textContent = `${isAnnotated ? '✅' : '📄'} ${name}`;
+            li.textContent = `📄 ${name}`;
             li.className = 'file-item';
             li.dataset.filename = name;
             li.addEventListener('click', () => switchImage(name));
             fileListElem.appendChild(li);
         });
-        // We need to call updateAnnotationStatus *again* after creating the elements
         await updateAnnotationStatus();
     });
-
     propsFileInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;
-
         const reader = new FileReader();
         reader.onload = (event) => {
             try {
@@ -232,17 +259,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 populatePropertiesPanel(newConfig);
                 alert('Successfully loaded new properties file.');
             } catch (error) {
-                alert('Failed to parse JSON from the properties file.');
-                console.error("JSON Parse Error:", error);
+                alert('Failed to parse JSON from properties file.');
             }
         };
-        reader.onerror = () => {
-            alert('Error reading the properties file.');
-        };
         reader.readAsText(file);
-        e.target.value = ''; // Reset input so same file can be loaded again
+        e.target.value = '';
     });
-    
     setAnnotDirBtn.addEventListener('click', async () => {
         const path = annotDirInput.value.trim();
         if (!path) {
@@ -259,14 +281,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const errorData = await response.json();
                 throw new Error(errorData.description || 'Failed to set directory.');
             }
-            alert(`Annotation directory successfully set to:\n${path}`);
+            alert(`Annotation directory set to:\n${path}`);
             await updateAnnotationStatus();
         } catch (error) {
             alert(`Error setting directory: ${error.message}`);
-            console.error("Set Directory Error:", error);
         }
     });
-
     saveBtn.addEventListener('click', () => {
         if (!currentImageName) {
             alert('Please select an image first.');
@@ -274,45 +294,70 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         saveAnnotations().then(() => alert('Annotations saved!'));
     });
-
+    resetViewBtn.addEventListener('click', () => {
+        if (!currentImage) return;
+        zoomToFit(currentImage.width, currentImage.height);
+        redraw();
+    });
     canvas.addEventListener('mousedown', e => {
         if (!currentImage) return;
-        const rect = canvas.getBoundingClientRect();
-        startX = (e.clientX - rect.left) * (canvas.width / rect.width);
-        startY = (e.clientY - rect.top) * (canvas.height / rect.height);
-        isDrawing = true;
-    });
-
-    canvas.addEventListener('mousemove', e => {
-        if (!isDrawing) return;
-        const rect = canvas.getBoundingClientRect();
-        const mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
-        const mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
-        currentRoi = { x: Math.min(startX, mouseX), y: Math.min(startY, mouseY), w: Math.abs(mouseX - startX), h: Math.abs(mouseY - startY) };
-        redraw();
-    });
-
-    canvas.addEventListener('mouseup', () => {
-        if (!isDrawing) return;
-        isDrawing = false;
-        if (currentRoi.w > 5 && currentRoi.h > 5) {
-            currentRoi.properties = { ...currentProperties };
-            rois.push(currentRoi);
+        if (e.button === 1) {
+            e.preventDefault();
+            isPanning = true;
+            panStart.x = e.clientX;
+            panStart.y = e.clientY;
+            canvas.classList.add('panning');
+        } else if (e.button === 0) {
+            const pos = getMousePos(e);
+            startX = pos.x;
+            startY = pos.y;
+            isDrawing = true;
         }
-        currentRoi = {};
-        redraw();
     });
-
+    // Corrected: Pan logic now moves the image intuitively
+    canvas.addEventListener('mousemove', e => {
+        if (isPanning) {
+            const dx = e.clientX - panStart.x;
+            const dy = e.clientY - panStart.y;
+            panStart.x = e.clientX;
+            panStart.y = e.clientY;
+            originX -= dx / scale;
+            originY -= dy / scale;
+            redraw();
+        } else if (isDrawing) {
+            const pos = getMousePos(e);
+            currentRoi = {
+                x: Math.min(startX, pos.x),
+                y: Math.min(startY, pos.y),
+                w: Math.abs(pos.x - startX),
+                h: Math.abs(pos.y - startY),
+            };
+            redraw();
+        }
+    });
+    canvas.addEventListener('mouseup', e => {
+        if (isPanning) {
+            isPanning = false;
+            canvas.classList.remove('panning');
+        }
+        if (isDrawing) {
+            isDrawing = false;
+            if (currentRoi.w > 5 / scale && currentRoi.h > 5 / scale) {
+                currentRoi.properties = { ...currentProperties };
+                rois.push(currentRoi);
+            }
+            currentRoi = {};
+            redraw();
+        }
+    });
     canvas.addEventListener('contextmenu', e => {
         e.preventDefault();
         if (!currentImage) return;
-        const rect = canvas.getBoundingClientRect();
-        const mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
-        const mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
+        const pos = getMousePos(e);
         let roiToDelete = -1;
         for (let i = rois.length - 1; i >= 0; i--) {
             const roi = rois[i];
-            if (mouseX >= roi.x && mouseX <= roi.x + roi.w && mouseY >= roi.y && mouseY <= roi.y + roi.h) {
+            if (pos.x >= roi.x && pos.x <= roi.x + roi.w && pos.y >= roi.y && pos.y <= roi.y + roi.h) {
                 roiToDelete = i;
                 break;
             }
@@ -324,8 +369,30 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
-
+    // Corrected: Zoom logic with the right transform math
+    canvas.addEventListener('wheel', e => {
+        if (!currentImage) return;
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const canvasX = e.clientX - rect.left;
+        const canvasY = e.clientY - rect.top;
+        
+        const worldX = (canvasX / scale) + originX;
+        const worldY = (canvasY / scale) + originY;
+        
+        const zoom = e.deltaY < 0 ? 1.1 : 0.9;
+        const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale * zoom));
+        
+        const newOriginX = worldX - (canvasX / newScale);
+        const newOriginY = worldY - (canvasY / newScale);
+        
+        scale = newScale;
+        originX = newOriginX;
+        originY = newOriginY;
+        
+        redraw();
+    });
     // --- Initial Load ---
-    populatePropertiesPanel(); // Load default properties on start
+    populatePropertiesPanel();
     redraw();
 });
