@@ -21,6 +21,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentRoi = {};
     let currentProperties = {};
     let localFileObjects = {};
+    let iconCache = {};
+    let propertyConfig = {};
 
     // --- View Transform State ---
     let scale = 1.0;
@@ -32,7 +34,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const MAX_SCALE = 10;
 
     // --- Helper Functions ---
-
     const getMousePos = (e) => {
         const rect = canvas.getBoundingClientRect();
         const canvasX = e.clientX - rect.left;
@@ -42,7 +43,6 @@ document.addEventListener('DOMContentLoaded', () => {
             y: (canvasY / scale) + originY,
         };
     };
-
     const zoomToFit = (imageWidth, imageHeight) => {
         const canvasWidth = canvas.clientWidth;
         const canvasHeight = canvas.clientHeight;
@@ -52,7 +52,6 @@ document.addEventListener('DOMContentLoaded', () => {
         originX = (imageWidth - canvasWidth / scale) / 2;
         originY = (imageHeight - canvasHeight / scale) / 2;
     };
-
     const resetState = () => {
         rois = [];
         currentImage = null;
@@ -66,7 +65,6 @@ document.addEventListener('DOMContentLoaded', () => {
         originY = 0;
         redraw();
     };
-
     const redraw = () => {
         const canvasWidth = canvas.width;
         const canvasHeight = canvas.height;
@@ -89,13 +87,35 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.fillText("Select an image to begin", worldCenterX, worldCenterY);
         }
         rois.forEach(roi => {
+            // Draw ROI box
             ctx.strokeStyle = 'lime';
             ctx.lineWidth = 2 / scale;
             ctx.strokeRect(roi.x, roi.y, roi.w, roi.h);
+
+            // Draw text label (using the 'Class' property by convention)
+            const label = roi.properties.Class?.name || 'Untitled';
             ctx.font = `${16 / scale}px Arial`;
             ctx.fillStyle = 'lime';
-            const label = roi.properties.Class || 'Untitled';
             ctx.fillText(label, roi.x, roi.y > 10 / scale ? roi.y - 5 / scale : roi.y + roi.h + 15 / scale);
+
+            // --- New: Draw all available icons stacked vertically ---
+            let iconOffsetY = 0;
+            const iconSize = 24 / scale; // Keep icon screen size constant
+            
+            Object.values(roi.properties).forEach(propValue => {
+                const iconName = propValue?.icon; // Use optional chaining to safely get icon
+                if (iconName && iconCache[iconName]?.complete) {
+                    const iconImg = iconCache[iconName];
+                    const iconX = roi.x + roi.w - iconSize; // Top-right corner
+                    const iconY = roi.y + iconOffsetY;
+
+                    // Ensure icon doesn't draw outside the ROI box height
+                    if (iconY + iconSize <= roi.y + roi.h) {
+                        ctx.drawImage(iconImg, iconX, iconY, iconSize, iconSize);
+                        iconOffsetY += iconSize; // Increment Y offset for the next icon
+                    }
+                }
+            });
         });
         if (isDrawing && currentRoi.w && currentRoi.h) {
             ctx.strokeStyle = 'yellow';
@@ -104,31 +124,40 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         ctx.restore();
     };
-
     const populatePropertiesPanel = (customConfig = null) => {
         const processConfig = (config) => {
+            propertyConfig = config;
+            iconCache = {};
             propertiesForm.innerHTML = '';
             currentProperties = {};
-            Object.keys(config).forEach(propName => {
-                const options = config[propName];
+            Object.keys(propertyConfig).forEach(propName => {
+                propertyConfig[propName].forEach(option => {
+                    if (option.icon && !iconCache[option.icon]) {
+                        const img = new Image();
+                        img.src = `/static/icons/${option.icon}`;
+                        iconCache[option.icon] = img;
+                    }
+                });
+                const options = propertyConfig[propName];
                 const group = document.createElement('div');
                 group.className = 'property-group';
                 const label = document.createElement('label');
                 label.textContent = propName;
                 const select = document.createElement('select');
                 select.dataset.propertyName = propName;
-                options.forEach(optionValue => {
-                    const option = document.createElement('option');
-                    option.value = optionValue;
-                    option.textContent = optionValue;
-                    select.appendChild(option);
+                options.forEach((option, index) => {
+                    const optElem = document.createElement('option');
+                    optElem.value = index;
+                    optElem.textContent = option.name;
+                    select.appendChild(optElem);
                 });
                 group.appendChild(label);
                 group.appendChild(select);
                 propertiesForm.appendChild(group);
-                currentProperties[propName] = select.value;
+                currentProperties[propName] = options.length > 0 ? options[0] : {};
                 select.addEventListener('change', (e) => {
-                    currentProperties[e.target.dataset.propertyName] = e.target.value;
+                    const selectedIndex = e.target.value;
+                    currentProperties[e.target.dataset.propertyName] = options[selectedIndex];
                 });
             });
         };
@@ -144,7 +173,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
         }
     };
-
     const updateAnnotationStatus = async () => {
         const filenames = Object.keys(localFileObjects);
         if (filenames.length === 0) return;
@@ -154,7 +182,6 @@ document.addEventListener('DOMContentLoaded', () => {
             body: JSON.stringify({ filenames }),
         });
         const annotationStatus = await response.json();
-
         document.querySelectorAll('#file-list .file-item').forEach(li => {
             const name = li.dataset.filename;
             const status = annotationStatus[name];
@@ -172,7 +199,6 @@ document.addEventListener('DOMContentLoaded', () => {
             li.textContent = `${icon} ${name}`;
         });
     };
-
     const switchImage = async (filename) => {
         if (currentImageName && currentImageName !== filename) {
             await saveAnnotations();
@@ -195,7 +221,6 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         img.onerror = () => { alert(`Failed to load image: ${filename}`); };
     };
-
     const loadAnnotations = async (filename) => {
         try {
             const response = await fetch(`/annotations/${filename}`);
@@ -206,7 +231,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         redraw();
     };
-
     const saveAnnotations = async () => {
         if (!currentImageName) return;
         try {
@@ -221,9 +245,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Error saving annotations:', error);
         }
     };
-
     // --- Event Listeners ---
-
     imageFolderInput.addEventListener('change', async (e) => {
         if (e.target.files.length === 0) return;
         resetState();
@@ -251,7 +273,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         await updateAnnotationStatus();
     });
-
     propsFileInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -268,7 +289,6 @@ document.addEventListener('DOMContentLoaded', () => {
         reader.readAsText(file);
         e.target.value = '';
     });
-
     setAnnotDirBtn.addEventListener('click', async () => {
         const path = annotDirInput.value.trim();
         if (!path) {
@@ -291,7 +311,6 @@ document.addEventListener('DOMContentLoaded', () => {
             alert(`Error setting directory: ${error.message}`);
         }
     });
-
     saveBtn.addEventListener('click', () => {
         if (!currentImageName) {
             alert('Please select an image first.');
@@ -299,13 +318,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         saveAnnotations().then(() => alert('Annotations saved!'));
     });
-
     resetViewBtn.addEventListener('click', () => {
         if (!currentImage) return;
         zoomToFit(currentImage.width, currentImage.height);
         redraw();
     });
-
     canvas.addEventListener('mousedown', e => {
         if (!currentImage) return;
         if (e.button === 1) { // Middle mouse button
@@ -321,7 +338,6 @@ document.addEventListener('DOMContentLoaded', () => {
             isDrawing = true;
         }
     });
-
     canvas.addEventListener('mousemove', e => {
         if (isPanning) {
             const dx = e.clientX - panStart.x;
@@ -342,7 +358,6 @@ document.addEventListener('DOMContentLoaded', () => {
             redraw();
         }
     });
-
     canvas.addEventListener('mouseup', e => {
         if (isPanning) {
             isPanning = false;
@@ -358,7 +373,6 @@ document.addEventListener('DOMContentLoaded', () => {
             redraw();
         }
     });
-
     canvas.addEventListener('contextmenu', e => {
         e.preventDefault();
         if (!currentImage) return;
@@ -372,13 +386,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         if (roiToDelete !== -1) {
-            if (confirm(`Delete ROI "${rois[roiToDelete].properties.Class}"?`)) {
+            if (confirm(`Delete ROI "${roi.properties.Class?.name || 'Untitled'}"?`)) {
                 rois.splice(roiToDelete, 1);
                 redraw();
             }
         }
     });
-
     canvas.addEventListener('wheel', e => {
         if (!currentImage) return;
         e.preventDefault();
@@ -396,7 +409,6 @@ document.addEventListener('DOMContentLoaded', () => {
         originY = newOriginY;
         redraw();
     });
-
     // --- Initial Load ---
     populatePropertiesPanel();
     redraw();

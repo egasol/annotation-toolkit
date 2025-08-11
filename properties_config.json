@@ -1,5 +1,20 @@
 {
-	"Class": ["Car", "Pedestrian", "Bicycle", "Traffic Light", "Sign"],
-	"Occluded": ["No", "Partially", "Fully"],
-	"Weather": ["Sunny", "Cloudy", "Rainy", "Night"]
-  }
+	"Class": [
+	  { "name": "Car", "icon": "car_icon.png" },
+	  { "name": "Truck", "icon": "truck_icon.png" },
+	  { "name": "Bicycle", "icon": "bicycle_icon.png" }
+	],
+	"Occluded": [
+	  { "name": "None", "icon": null },
+	  { "name": "Partly", "icon": "occluded_icon.png" }
+	],
+	"Direction": [
+	  { "name": "Oncoming", "icon": "oncoming_icon.png" },
+	  { "name": "Preceding", "icon": "preceding_icon.png" },
+    { "name": "Lateral", "icon": "lateral_icon.png" }
+	],
+  "Parked": [
+    { "name": "No", "icon": null },
+	  { "name": "Yes", "icon": "preceding_icon.png" }
+  ]
+}
