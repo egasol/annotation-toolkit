@@ -15,6 +15,6 @@
 	],
   "Parked": [
     { "name": "No", "icon": null },
-	  { "name": "Yes", "icon": "preceding_icon.png" }
+	  { "name": "Yes", "icon": "parked_icon.png" }
   ]
 }
