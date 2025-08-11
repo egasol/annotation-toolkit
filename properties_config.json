@@ -1,0 +1,5 @@
+{
+	"Class": ["Car", "Pedestrian", "Bicycle", "Traffic Light", "Sign"],
+	"Occluded": ["No", "Partially", "Fully"],
+	"Weather": ["Sunny", "Cloudy", "Rainy", "Night"]
+  }
