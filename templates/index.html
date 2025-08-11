@@ -12,9 +12,11 @@
         #image-viewer { flex-grow: 1; padding: 10px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; }
         canvas { border: 1px solid #000; background-color: #e9e9e9; cursor: crosshair; max-width: 100%; max-height: 85vh; }
         #controls { margin-top: 10px; }
-        button, .button-label { padding: 8px 15px; font-size: 16px; cursor: pointer; background-color: #007bff; color: white; border: none; border-radius: 4px; text-align: center; }
-        .button-label:hover { background-color: #0056b3; }
-        #folder-selector { padding-bottom: 10px; border-bottom: 2px solid #ccc; }
+        button, .button-label { padding: 8px 15px; font-size: 16px; cursor: pointer; background-color: #007bff; color: white; border: none; border-radius: 4px; text-align: center; display: block; width: calc(100% - 30px); margin-bottom: 10px; }
+        .button-label:hover, button:hover { background-color: #0056b3; }
+        .panel-section { padding-bottom: 10px; border-bottom: 2px solid #ccc; margin-bottom: 10px; }
+        .panel-section:last-child { border-bottom: none; }
+        .panel-section h4 { margin-top: 0; }
         #file-list-container { flex-grow: 1; overflow-y: auto; }
         ul { list-style-type: none; padding-left: 0; }
         li.file-item { cursor: pointer; padding: 8px; border-bottom: 1px solid #eee; word-break: break-all; }
@@ -23,14 +25,21 @@
         .property-group { margin-bottom: 15px; }
         .property-group label { display: block; font-weight: bold; margin-bottom: 5px; }
         .property-group select { width: 100%; padding: 5px; }
+        .settings-input { width: calc(100% - 12px); padding: 5px; margin-bottom: 5px; }
+        .settings-button { width: 100%; font-size: 14px; padding: 6px 12px; }
     </style>
 </head>
 <body>
     <div id="file-browser" class="panel">
-        <div id="folder-selector">
-            <h4>Select Images</h4>
+        <div class="panel-section">
+            <h4>Image Source</h4>
             <input type="file" id="file-input" webkitdirectory directory multiple hidden/>
-            <label for="file-input" class="button-label">📂 Select Folder</label>
+            <label for="file-input" class="button-label">📂 Select Image Folder</label>
+        </div>
+        <div class="panel-section">
+            <h4>Annotation Folder</h4>
+            <input type="text" id="annot-dir-input" class="settings-input" placeholder="Paste absolute folder path...">
+            <button id="set-annot-dir-btn" class="settings-button">Set Save Directory</button>
         </div>
         <div id="file-list-container">
             <h3>Image Files</h3>
@@ -39,8 +48,12 @@
     </div>
     
     <div id="properties-panel" class="panel">
-        <h3>ROI Properties</h3>
-        <div id="properties-form"><p>Loading properties...</p></div>
+        <div class="panel-section">
+            <h4>ROI Properties</h4>
+            <input type="file" id="props-input" accept=".json" hidden />
+            <label for="props-input" class="button-label" style="font-size: 14px;">Load Properties File</label>
+        </div>
+        <div id="properties-form"><p>Loading default properties...</p></div>
     </div>
 
     <div id="image-viewer">

@@ -6,7 +6,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveBtn = document.getElementById('save-btn');
     const imageNameDisplay = document.getElementById('current-image-name');
     const propertiesForm = document.getElementById('properties-form');
-    const fileInput = document.getElementById('file-input');
+    const imageFolderInput = document.getElementById('file-input');
+    const propsFileInput = document.getElementById('props-input');
+    const annotDirInput = document.getElementById('annot-dir-input');
+    const setAnnotDirBtn = document.getElementById('set-annot-dir-btn');
 
     // --- State Management ---
     let rois = [];
@@ -61,20 +64,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    const populatePropertiesPanel = async () => {
-        try {
-            const response = await fetch('/get_properties_config');
-            const config = await response.json();
+    const populatePropertiesPanel = (customConfig = null) => {
+        const processConfig = (config) => {
             propertiesForm.innerHTML = '';
+            currentProperties = {}; // Reset current properties
             Object.keys(config).forEach(propName => {
                 const options = config[propName];
                 const group = document.createElement('div');
                 group.className = 'property-group';
                 const label = document.createElement('label');
-                label.setAttribute('for', `prop-${propName}`);
                 label.textContent = propName;
                 const select = document.createElement('select');
-                select.id = `prop-${propName}`;
                 select.dataset.propertyName = propName;
                 options.forEach(optionValue => {
                     const option = document.createElement('option');
@@ -90,51 +90,38 @@ document.addEventListener('DOMContentLoaded', () => {
                     currentProperties[e.target.dataset.propertyName] = e.target.value;
                 });
             });
-        } catch (error) {
-            propertiesForm.innerHTML = '<p>Could not load properties.</p>';
-            console.error("Error populating properties:", error);
+        };
+
+        if (customConfig) {
+            processConfig(customConfig);
+        } else {
+            fetch('/get_properties_config')
+                .then(response => response.json())
+                .then(processConfig)
+                .catch(error => {
+                    propertiesForm.innerHTML = '<p>Could not load default properties.</p>';
+                    console.error("Error loading default properties:", error);
+                });
         }
     };
-
-    // --- File and Annotation I/O ---
-    fileInput.addEventListener('change', async (e) => {
-        if (e.target.files.length === 0) return;
-
-        resetState();
-        const supportedFormats = ['image/jpeg', 'image/png', 'image/gif'];
-        let imageFiles = [];
-
-        for (const file of e.target.files) {
-            if (supportedFormats.includes(file.type)) {
-                localFileObjects[file.name] = file;
-                imageFiles.push(file.name);
-            }
-        }
-        imageFiles.sort();
-
-        if (imageFiles.length === 0) {
-            fileListElem.innerHTML = '<li>No supported images found in the selected directory.</li>';
-            return;
-        }
+    
+    const updateAnnotationStatus = async () => {
+        const filenames = Object.keys(localFileObjects);
+        if (filenames.length === 0) return;
 
         const response = await fetch('/batch_annotation_status', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filenames: imageFiles }),
+            body: JSON.stringify({ filenames }),
         });
         const annotationStatus = await response.json();
 
-        fileListElem.innerHTML = '';
-        imageFiles.forEach(name => {
-            const li = document.createElement('li');
+        document.querySelectorAll('#file-list .file-item').forEach(li => {
+            const name = li.dataset.filename;
             const isAnnotated = annotationStatus[name];
             li.textContent = `${isAnnotated ? '✅' : '📄'} ${name}`;
-            li.className = 'file-item';
-            li.dataset.filename = name;
-            li.addEventListener('click', () => switchImage(name));
-            fileListElem.appendChild(li);
         });
-    });
+    };
 
     const switchImage = async (filename) => {
         if (currentImageName && currentImageName !== filename) {
@@ -192,8 +179,102 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Error saving annotations:', error);
         }
     };
+    
+    // --- Event Listeners ---
 
-    // --- Canvas Event Handlers ---
+    imageFolderInput.addEventListener('change', async (e) => {
+        if (e.target.files.length === 0) return;
+
+        resetState();
+        const supportedFormats = ['image/jpeg', 'image/png', 'image/gif'];
+        let imageFiles = [];
+
+        for (const file of e.target.files) {
+            if (supportedFormats.includes(file.type)) {
+                localFileObjects[file.name] = file;
+                imageFiles.push(file.name);
+            }
+        }
+        imageFiles.sort();
+
+        if (imageFiles.length === 0) {
+            fileListElem.innerHTML = '<li>No supported images found in the selected directory.</li>';
+            return;
+        }
+
+        // Now that files are loaded client-side, check their status on the server
+        await updateAnnotationStatus();
+
+        // And finally, populate the UI list
+        fileListElem.innerHTML = '';
+        imageFiles.forEach(name => {
+            const li = document.createElement('li');
+            const fileItem = document.querySelector(`li[data-filename="${name}"]`);
+            const isAnnotated = fileItem ? fileItem.textContent.startsWith('✅') : false;
+            li.textContent = `${isAnnotated ? '✅' : '📄'} ${name}`;
+            li.className = 'file-item';
+            li.dataset.filename = name;
+            li.addEventListener('click', () => switchImage(name));
+            fileListElem.appendChild(li);
+        });
+        // We need to call updateAnnotationStatus *again* after creating the elements
+        await updateAnnotationStatus();
+    });
+
+    propsFileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const newConfig = JSON.parse(event.target.result);
+                populatePropertiesPanel(newConfig);
+                alert('Successfully loaded new properties file.');
+            } catch (error) {
+                alert('Failed to parse JSON from the properties file.');
+                console.error("JSON Parse Error:", error);
+            }
+        };
+        reader.onerror = () => {
+            alert('Error reading the properties file.');
+        };
+        reader.readAsText(file);
+        e.target.value = ''; // Reset input so same file can be loaded again
+    });
+    
+    setAnnotDirBtn.addEventListener('click', async () => {
+        const path = annotDirInput.value.trim();
+        if (!path) {
+            alert("Please enter a folder path.");
+            return;
+        }
+        try {
+            const response = await fetch('/set_annotation_dir', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: path }),
+            });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.description || 'Failed to set directory.');
+            }
+            alert(`Annotation directory successfully set to:\n${path}`);
+            await updateAnnotationStatus();
+        } catch (error) {
+            alert(`Error setting directory: ${error.message}`);
+            console.error("Set Directory Error:", error);
+        }
+    });
+
+    saveBtn.addEventListener('click', () => {
+        if (!currentImageName) {
+            alert('Please select an image first.');
+            return;
+        }
+        saveAnnotations().then(() => alert('Annotations saved!'));
+    });
+
     canvas.addEventListener('mousedown', e => {
         if (!currentImage) return;
         const rect = canvas.getBoundingClientRect();
@@ -245,14 +326,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Initial Load ---
-    saveBtn.addEventListener('click', () => {
-        if (!currentImageName) {
-            alert('Please select an image first.');
-            return;
-        }
-        saveAnnotations().then(() => alert('Annotations saved!'));
-    });
-
-    populatePropertiesPanel();
-    redraw(); // Initial draw for the empty canvas
+    populatePropertiesPanel(); // Load default properties on start
+    redraw();
 });
