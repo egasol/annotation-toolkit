@@ -33,32 +33,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Helper Functions ---
 
-    // Corrected: Converts a canvas point to a point in the "world" (image) space
     const getMousePos = (e) => {
         const rect = canvas.getBoundingClientRect();
         const canvasX = e.clientX - rect.left;
         const canvasY = e.clientY - rect.top;
-        
-        // Convert canvas point to world point
         return {
             x: (canvasX / scale) + originX,
             y: (canvasY / scale) + originY,
         };
     };
-    
+
     const zoomToFit = (imageWidth, imageHeight) => {
         const canvasWidth = canvas.clientWidth;
         const canvasHeight = canvas.clientHeight;
         const scaleX = canvasWidth / imageWidth;
         const scaleY = canvasHeight / imageHeight;
-        
         scale = Math.min(scaleX, scaleY);
-
-        // Center the image. Origin is the top-left of the viewport in world-space.
         originX = (imageWidth - canvasWidth / scale) / 2;
         originY = (imageHeight - canvasHeight / scale) / 2;
     };
-    
+
     const resetState = () => {
         rois = [];
         currentImage = null;
@@ -73,20 +67,15 @@ document.addEventListener('DOMContentLoaded', () => {
         redraw();
     };
 
-    // Corrected: Redraw function with correct transform logic
     const redraw = () => {
         const canvasWidth = canvas.width;
         const canvasHeight = canvas.height;
-        
         ctx.save();
         ctx.clearRect(0, 0, canvasWidth, canvasHeight);
         ctx.fillStyle = '#e9e9e9';
         ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-        
-        // Translate and scale to view the world from the origin point
         ctx.translate(-originX * scale, -originY * scale);
         ctx.scale(scale, scale);
-
         if (currentImage) {
             ctx.imageSmoothingEnabled = scale < 1;
             ctx.drawImage(currentImage, 0, 0);
@@ -95,12 +84,10 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.font = '20px Arial';
-            // To center text, we need to find the center of the canvas in world coordinates
             const worldCenterX = (canvasWidth / 2) / scale + originX;
             const worldCenterY = (canvasHeight / 2) / scale + originY;
             ctx.fillText("Select an image to begin", worldCenterX, worldCenterY);
         }
-
         rois.forEach(roi => {
             ctx.strokeStyle = 'lime';
             ctx.lineWidth = 2 / scale;
@@ -110,17 +97,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const label = roi.properties.Class || 'Untitled';
             ctx.fillText(label, roi.x, roi.y > 10 / scale ? roi.y - 5 / scale : roi.y + roi.h + 15 / scale);
         });
-
         if (isDrawing && currentRoi.w && currentRoi.h) {
             ctx.strokeStyle = 'yellow';
             ctx.lineWidth = 2 / scale;
             ctx.strokeRect(currentRoi.x, currentRoi.y, currentRoi.w, currentRoi.h);
         }
-
         ctx.restore();
     };
-    
-    // Unchanged from here...
+
     const populatePropertiesPanel = (customConfig = null) => {
         const processConfig = (config) => {
             propertiesForm.innerHTML = '';
@@ -160,6 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
         }
     };
+
     const updateAnnotationStatus = async () => {
         const filenames = Object.keys(localFileObjects);
         if (filenames.length === 0) return;
@@ -169,12 +154,25 @@ document.addEventListener('DOMContentLoaded', () => {
             body: JSON.stringify({ filenames }),
         });
         const annotationStatus = await response.json();
+
         document.querySelectorAll('#file-list .file-item').forEach(li => {
             const name = li.dataset.filename;
-            const isAnnotated = annotationStatus[name];
-            li.textContent = `${isAnnotated ? '✅' : '📄'} ${name}`;
+            const status = annotationStatus[name];
+            let icon;
+            switch (status) {
+                case 'annotated':
+                    icon = '✅';
+                    break;
+                case 'empty':
+                    icon = '🟡';
+                    break;
+                default:
+                    icon = '📄';
+            }
+            li.textContent = `${icon} ${name}`;
         });
     };
+
     const switchImage = async (filename) => {
         if (currentImageName && currentImageName !== filename) {
             await saveAnnotations();
@@ -197,6 +195,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         img.onerror = () => { alert(`Failed to load image: ${filename}`); };
     };
+
     const loadAnnotations = async (filename) => {
         try {
             const response = await fetch(`/annotations/${filename}`);
@@ -207,6 +206,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         redraw();
     };
+
     const saveAnnotations = async () => {
         if (!currentImageName) return;
         try {
@@ -221,7 +221,9 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Error saving annotations:', error);
         }
     };
+
     // --- Event Listeners ---
+
     imageFolderInput.addEventListener('change', async (e) => {
         if (e.target.files.length === 0) return;
         resetState();
@@ -249,6 +251,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         await updateAnnotationStatus();
     });
+
     propsFileInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -265,6 +268,7 @@ document.addEventListener('DOMContentLoaded', () => {
         reader.readAsText(file);
         e.target.value = '';
     });
+
     setAnnotDirBtn.addEventListener('click', async () => {
         const path = annotDirInput.value.trim();
         if (!path) {
@@ -287,6 +291,7 @@ document.addEventListener('DOMContentLoaded', () => {
             alert(`Error setting directory: ${error.message}`);
         }
     });
+
     saveBtn.addEventListener('click', () => {
         if (!currentImageName) {
             alert('Please select an image first.');
@@ -294,27 +299,29 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         saveAnnotations().then(() => alert('Annotations saved!'));
     });
+
     resetViewBtn.addEventListener('click', () => {
         if (!currentImage) return;
         zoomToFit(currentImage.width, currentImage.height);
         redraw();
     });
+
     canvas.addEventListener('mousedown', e => {
         if (!currentImage) return;
-        if (e.button === 1) {
+        if (e.button === 1) { // Middle mouse button
             e.preventDefault();
             isPanning = true;
             panStart.x = e.clientX;
             panStart.y = e.clientY;
             canvas.classList.add('panning');
-        } else if (e.button === 0) {
+        } else if (e.button === 0) { // Left mouse button
             const pos = getMousePos(e);
             startX = pos.x;
             startY = pos.y;
             isDrawing = true;
         }
     });
-    // Corrected: Pan logic now moves the image intuitively
+
     canvas.addEventListener('mousemove', e => {
         if (isPanning) {
             const dx = e.clientX - panStart.x;
@@ -335,6 +342,7 @@ document.addEventListener('DOMContentLoaded', () => {
             redraw();
         }
     });
+
     canvas.addEventListener('mouseup', e => {
         if (isPanning) {
             isPanning = false;
@@ -350,6 +358,7 @@ document.addEventListener('DOMContentLoaded', () => {
             redraw();
         }
     });
+
     canvas.addEventListener('contextmenu', e => {
         e.preventDefault();
         if (!currentImage) return;
@@ -369,29 +378,25 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
-    // Corrected: Zoom logic with the right transform math
+
     canvas.addEventListener('wheel', e => {
         if (!currentImage) return;
         e.preventDefault();
         const rect = canvas.getBoundingClientRect();
         const canvasX = e.clientX - rect.left;
         const canvasY = e.clientY - rect.top;
-        
         const worldX = (canvasX / scale) + originX;
         const worldY = (canvasY / scale) + originY;
-        
         const zoom = e.deltaY < 0 ? 1.1 : 0.9;
         const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale * zoom));
-        
         const newOriginX = worldX - (canvasX / newScale);
         const newOriginY = worldY - (canvasY / newScale);
-        
         scale = newScale;
         originX = newOriginX;
         originY = newOriginY;
-        
         redraw();
     });
+
     // --- Initial Load ---
     populatePropertiesPanel();
     redraw();
